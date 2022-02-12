@@ -103,17 +103,20 @@ func con(host string, header http.Header, interrupt chan os.Signal, buf chan str
 
 		select {
 		case <-done:
+			os.Exit(0)
 			return
 		case <-ticker.C:
 			err := conn.WriteMessage(websocket.TextMessage, str)
 			if err != nil {
 				log.Println("write server fail: ", err)
+				os.Exit(0)
 				return
 			}
 		case <-interrupt:
 			log.Println("interrupt")
 			err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 			if err != nil {
+				os.Exit(0)
 				log.Println("write close:", err)
 				return
 			}
