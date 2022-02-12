@@ -1,33 +1,31 @@
 package main
 
 import (
-	"bytes"
-	"context"
+	"bufio"
 	"encoding/json"
 	"flag"
 	"github.com/gorilla/websocket"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"sync/atomic"
+	"time"
 )
 
 // 统计接收到的是第几条数据
 var count int64
 
-// wbsoket 连接小工具
+// websocket 连接小工具
 func main() {
 	var host string
 
 	var headerString string
 
 	flag.StringVar(&host, "h", "127.0.0.1:8000", "ws server address:port")
-	flag.StringVar(&headerString, "r", `{"Upgrade":"websocket", "Accept-Language": "zh-CN,zh;q=0.9"}`, "set request header, Multiple parameters in the request header can be separated by commas")
+	flag.StringVar(&headerString, "r", `{}`, "set request header, Multiple parameters in the request header can be separated by commas")
 	flag.Parse()
-
-	// 进行socket 连接
 	log.Printf("start con.. %s", host)
-
-	// 获取上下文
-	ctx, cancel := context.WithCancel(context.Background())
 
 	// 转换header 格式
 	var header map[string]interface{}
@@ -40,35 +38,91 @@ func main() {
 		headerH[k] = []string{v.(string)}
 	}
 
-	// 进行连接
-	con(ctx, host, headerH)
+	// 终止连接依据
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
 
-	// 进程结束
-	cancel()
+	// 控制连接粒度
+	buf := make(chan struct{}, 1)
+	buf <- struct{}{}
+
+	//初始化尝试次数
+	count = 0
+
+	// 进行连接
+	for {
+		if count < 5 {
+			<-buf
+			go con(host, headerH, interrupt, buf)
+		}
+	}
 
 }
 
-func con(ctx context.Context, host string, header http.Header) {
+func con(host string, header http.Header, interrupt chan os.Signal, buf chan struct{}) {
 	conn, _, err := websocket.DefaultDialer.Dial(host, header)
 	if err != nil {
-		log.Println("连接失败", err)
+		log.Println("conn fail: ", err)
+		atomic.AddInt64(&count, 1) // 失败后连接次数+1
+		buf <- struct{}{}
 		return
 	}
 	defer func() {
 		conn.Close()
 		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 	}()
-	// 监听读取过来的消息
+
+	log.Println("conn successfully！")
+
+	done := make(chan struct{})
+	// 读取
 	go func() {
+		defer close(done)
 		for {
-			_, p, err := conn.ReadMessage()
-			log.Println("read server message is：", bytes.NewBuffer(p).String())
+			_, message, err := conn.ReadMessage()
 			if err != nil {
-				<-ctx.Done()
-				log.Println("read server message err: ", err)
-				return
+				log.Println("read server message fail:", err)
+				os.Exit(1)
 			}
+			log.Printf("Read the message returned by the server is : %s", string(message))
 		}
 	}()
+
+	// 写入
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		// 交互模式，控制台输入
+		log.Println("interactive mode，Please enter a message to send :")
+		in := bufio.NewReader(os.Stdin)
+		str, _, err := in.ReadLine()
+		if err != nil {
+			log.Println("输入错误：", err)
+			return
+		}
+
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			err := conn.WriteMessage(websocket.TextMessage, str)
+			if err != nil {
+				log.Println("write server fail: ", err)
+				return
+			}
+		case <-interrupt:
+			log.Println("interrupt")
+			err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			if err != nil {
+				log.Println("write close:", err)
+				return
+			}
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+			}
+			return
+		}
+	}
 
 }
