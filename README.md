@@ -5,3 +5,6 @@ wocket 连接测试交互工具
 `ws -h ws://127.0.0.1:8000 -r '{"Upgrade":"websocket", "Accept-Language": "zh-CN,zh;q=0.9"}'
 `
  如果要退出交互命令行,连续4个 control + c ，并按 enter 可退出程序
+ 
+ <img width="723" alt="image" src="https://user-images.githubusercontent.com/73807441/153709066-3574cd28-27b7-4c80-80fe-0af1475c83ea.png">
+<img width="763" alt="image" src="https://user-images.githubusercontent.com/73807441/153709084-e689dc16-e53d-4024-a472-1507843d7760.png">
