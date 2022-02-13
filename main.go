@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -38,9 +39,10 @@ func main() {
 		headerH[k] = []string{v.(string)}
 	}
 
-	// 终止连接依据
+	// 终止连接依据,接收信号
 	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
+	signal.Notify(interrupt, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	done := make(chan struct{})
 
 	// 控制连接粒度
 	buf := make(chan struct{}, 1)
@@ -53,13 +55,15 @@ func main() {
 	for {
 		if count < 5 {
 			<-buf
-			go con(host, headerH, interrupt, buf)
+			go con(host, headerH, interrupt, buf, done)
+		} else {
+			os.Exit(0)
 		}
 	}
 
 }
 
-func con(host string, header http.Header, interrupt chan os.Signal, buf chan struct{}) {
+func con(host string, header http.Header, interrupt chan os.Signal, buf chan struct{}, done chan struct{}) {
 	conn, _, err := websocket.DefaultDialer.Dial(host, header)
 	if err != nil {
 		log.Println("conn fail: ", err)
@@ -74,7 +78,6 @@ func con(host string, header http.Header, interrupt chan os.Signal, buf chan str
 
 	log.Println("conn successfully！")
 
-	done := make(chan struct{})
 	// 读取
 	go func() {
 		defer close(done)
